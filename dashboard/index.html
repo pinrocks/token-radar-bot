@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Token Launch Radar — Empirical Pre-TGE Valuation &amp; Points Playbook</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#radar-main">Skip to radar board</a>
+
+  <div class="app-shell" id="app-shell">
+    <header class="topbar" role="banner">
+      <div class="brand-cluster">
+        <div class="radar-emblem" aria-hidden="true">
+          <svg viewBox="0 0 24 24" class="emblem-svg">
+            <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.35"/>
+            <circle cx="12" cy="12" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.65"/>
+            <path d="M12 12 L18.7 5.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <circle cx="12" cy="12" r="2" fill="currentColor"/>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title-row">
+            <span class="brand-title">TOKEN LAUNCH RADAR</span>
+            <span class="model-pill" id="hdr-model-pill">eb-radar-v1.1</span>
+          </div>
+          <p class="brand-sub" id="hdr-subtitle">Empirical-Bayes pre-token FDV model &amp; concrete farming playbooks from DefiLlama snapshot</p>
+        </div>
+      </div>
+
+      <div class="mode-tabs" role="tablist" aria-label="Dataset view">
+        <button type="button" role="tab" id="tab-pretoken" class="mode-tab is-active" aria-selected="true" data-mode="pretoken">
+          <span class="dot dot-amber"></span>
+          <span>Pre-Token Launch Radar</span>
+          <span class="tab-count" id="tab-pretoken-count">0</span>
+        </button>
+        <button type="button" role="tab" id="tab-peers" class="mode-tab" aria-selected="false" data-mode="peers">
+          <span class="dot dot-cyan"></span>
+          <span>Traded Peer Comps</span>
+          <span class="tab-count" id="tab-peers-count">0</span>
+        </button>
+      </div>
+
+      <div class="snapshot-meta" id="hdr-meta">
+        <div class="meta-chip">
+          <span class="meta-label">SNAPSHOT</span>
+          <strong class="meta-val" id="meta-asof">--</strong>
+        </div>
+        <div class="meta-chip">
+          <span class="meta-label">FLOOR</span>
+          <strong class="meta-val" id="meta-floor">$50M</strong>
+        </div>
+        <div class="meta-chip meta-verified" id="meta-parity" title="Client-side recomputation matches board.json implied_value_usd across all rows">
+          <span class="meta-label">MODEL PARITY</span>
+          <strong class="meta-val" id="meta-parity-val">VERIFIED</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="kpi-strip" id="kpi-strip" aria-label="Radar summary telemetry"></section>
+
+    <section class="calibration-bar" id="calibration-bar" aria-label="Empirical category multiple calibration"></section>
+
+    <main id="radar-main" class="main-panel" tabindex="-1">
+      <section class="controls-bar" id="controls-bar" aria-label="Filter and sort controls">
+        <div class="search-box">
+          <svg viewBox="0 0 20 20" class="search-icon" aria-hidden="true">
+            <circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M12.8 12.8 L17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          <input type="search" id="search-input" placeholder="Search protocol, slug, category, chain...  [ / ]" aria-label="Search protocols" autocomplete="off">
+        </div>
+
+        <div class="select-group">
+          <label class="sr-only" for="filter-category">Category</label>
+          <select id="filter-category" aria-label="Filter by category">
+            <option value="all">All Categories</option>
+          </select>
+
+          <label class="sr-only" for="filter-chain">Chain</label>
+          <select id="filter-chain" aria-label="Filter by chain">
+            <option value="all">All Chains</option>
+          </select>
+        </div>
+
+        <div class="tier-pills" id="tier-pills" role="group" aria-label="Candidate tier filter">
+          <button type="button" class="pill-btn is-active" data-tier="all">All Pre-Token <span class="pill-n" id="pill-n-all"></span></button>
+          <button type="button" class="pill-btn" data-tier="watchlist">Watchlist &ge;$50M <span class="pill-n" id="pill-n-wl"></span></button>
+          <button type="button" class="pill-btn" data-tier="early">Early Gems &lt;$50M <span class="pill-n" id="pill-n-gem"></span></button>
+        </div>
+
+        <div class="controls-right">
+          <button type="button" class="reset-btn" id="reset-filters-btn" hidden>Reset Filters</button>
+          <span class="result-counter" id="result-counter">0 shown</span>
+        </div>
+      </section>
+
+      <div class="active-filters-row" id="active-filters-row" hidden></div>
+
+      <section class="table-card" id="table-container" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <div class="drawer-backdrop" id="drawer-backdrop" hidden>
+    <aside class="detail-drawer" id="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"></aside>
+  </div>
+
+  <script src="../data.js"></script>
+  <script defer src="app.js"></script>
+</body>
+</html>
