@@ -1,7 +1,7 @@
-// Entrypoint for token-radar-01 (Node 22 standard library only, zero network calls).
-// Reads /input/snapshot.json (or --input <path>), computes empirical-Bayes pre-token launch valuations
-// and DeFi farming playbooks, writes /output/board.json and /output/data.js, copies dashboard/ and
-// screenshots/ into /output/, and builds /output/dossier.json via vendor/makefun-board.ts.
+// Entrypoint for token-radar-01 Round 2 (Node 22 standard library only, zero network calls).
+// Executes the shared dashboard/model.js econometric & farming engine via lib/model.ts,
+// writes /output/board.json and /output/data.js, copies dashboard/ and screenshots/,
+// and emits canonical /output/dossier.json via vendor/makefun-board.ts.
 
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -107,29 +107,30 @@ function main(): void {
   const dashFiles = copyTreeClean(join(REPO_ROOT, 'dashboard'), join(outDir, 'dashboard'));
   const shotFiles = copyTreeClean(join(REPO_ROOT, 'screenshots'), join(outDir, 'screenshots'));
 
-  const hasDashboard = dashFiles.includes('index.html');
-  if (hasDashboard && shotFiles.length >= 3) {
+  if (dashFiles.includes('index.html') && shotFiles.length >= 3) {
     const dossierBytes = buildDossier(outDir, {
       text_max_bytes: TEXT_MAX_BYTES,
       screenshots: { max: 4, max_bytes: 524_288 },
       dashboard: { max_files: 400, max_bytes: 4_194_304 },
     });
     if (dossierBytes.byteLength > DOSSIER_GATE_MAX_BYTES) {
-      process.stderr.write(
-        `token-radar-bot: dossier.json (${dossierBytes.byteLength} bytes) exceeds 1.5 MiB gate cap (${DOSSIER_GATE_MAX_BYTES} bytes)\n`,
-      );
+      process.stderr.write(`token-radar-bot: dossier.json (${dossierBytes.byteLength}B) exceeds 1.5 MiB cap\n`);
       process.exit(1);
     }
     writeFileSync(join(outDir, 'dossier.json'), dossierBytes);
     const parsedDossier = JSON.parse(Buffer.from(dossierBytes).toString('utf8')) as { text: string };
     const textBytes = Buffer.byteLength(parsedDossier.text, 'utf8');
-    const wasCut = parsedDossier.text.includes('left out.]');
+    const wasCut = parsedDossier.text.includes('left out.]') || parsedDossier.text.includes('lines not shown.]');
+    if (process.argv.includes('--strict-dossier') && wasCut) {
+      process.stderr.write(`token-radar-bot: dossier text truncated (${textBytes}B / ${TEXT_MAX_BYTES}B)\n`);
+      process.exit(1);
+    }
     process.stdout.write(
-      `token-radar-bot: scored ${boardRows.length} pre-token candidates (${radarData.summary.watchlist_covered}/${radarData.summary.watchlist_total} watchlist, ${radarData.summary.early_gem_rows} early gems, ${radarData.summary.traded_peer_rows} traded peers) -> board.json (${boardByteLen}B), data.js, dashboard (${dashFiles.length} files, source=${textBytes}B, truncated=${wasCut}), screenshots (${shotFiles.length} images), dossier.json (${dossierBytes.byteLength}B)\n`,
+      `token-radar-bot: ${boardRows.length} rows (${radarData.summary.watchlist_covered}/${radarData.summary.watchlist_total} watchlist, ${radarData.summary.sub_floor_discovery_rows} sub-floor, ${radarData.summary.traded_anchor_families} anchors) -> board.json (${boardByteLen}B), source=${textBytes}B, truncated=${wasCut}, dossier=${dossierBytes.byteLength}B\n`,
     );
   } else {
     process.stdout.write(
-      `token-radar-bot: staged ${boardRows.length} pre-token candidates (${radarData.summary.watchlist_covered}/${radarData.summary.watchlist_total} watchlist, ${radarData.summary.early_gem_rows} early gems) -> board.json (${boardByteLen}B) & data.js ready (awaiting dashboard=${dashFiles.length} files / screenshots=${shotFiles.length} images for dossier.json)\n`,
+      `token-radar-bot: staged ${boardRows.length} rows (${radarData.summary.watchlist_covered}/${radarData.summary.watchlist_total} watchlist, ${radarData.summary.sub_floor_discovery_rows} sub-floor) -> board.json & data.js written\n`,
     );
   }
 }

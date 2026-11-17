@@ -1,112 +1,113 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Token Launch Radar — Empirical Pre-TGE Valuation &amp; Points Playbook</title>
-  <link rel="stylesheet" href="styles.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Token Launch Radar — Empirical Comps &amp; Costed DeFi Playbooks</title>
+<link rel="stylesheet" href="app.css">
 </head>
 <body>
-  <a class="skip-link" href="#radar-main">Skip to radar board</a>
+<a class="skip-link" href="#radar-board">Skip to board</a>
+<div class="page-frame">
+  <header class="masthead">
+    <div class="masthead-title-col">
+      <div class="kicker">EMPIRICAL LAUNCH RADAR &middot; ONE-PER-TICKER COMPS &amp; NET-EV PLAYBOOKS</div>
+      <div class="headline-row"><h1 class="pub-title">Token Launch Radar</h1><span class="edition-tag" id="model-tag">model.js</span></div>
+      <p class="pub-dek" id="hdr-dek">Concave power-law &amp; Empirical-Bayes curve calibrated on 94 canonical traded DeFi families, validated out-of-sample, with live dollar-costed deposit playbooks.</p>
+    </div>
+    <div class="masthead-ledger">
+      <div class="ledger-cell"><span class="ledger-k">SNAPSHOT AS OF</span><strong class="ledger-v" id="stat-asof">-</strong><span class="ledger-s" id="stat-source">-</span></div>
+      <div class="ledger-cell"><span class="ledger-k">PRE-TOKEN RADAR</span><strong class="ledger-v" id="stat-coverage">-</strong><span class="ledger-s" id="stat-discovery">-</span></div>
+      <div class="ledger-cell"><span class="ledger-k">BOARD / UI PARITY</span><strong class="ledger-v emerald-ink" id="stat-parity">-</strong><span class="ledger-s" id="stat-anchors">-</span></div>
+      <div class="ledger-cell"><span class="ledger-k">LIVE SIZING</span><strong class="ledger-v" id="stat-sizing">-</strong><span class="ledger-s" id="stat-verdicts">-</span></div>
+    </div>
+  </header>
 
-  <div class="app-shell" id="app-shell">
-    <header class="topbar" role="banner">
-      <div class="brand-cluster">
-        <div class="radar-emblem" aria-hidden="true">
-          <svg viewBox="0 0 24 24" class="emblem-svg">
-            <circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.35"/>
-            <circle cx="12" cy="12" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.65"/>
-            <path d="M12 12 L18.7 5.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-            <circle cx="12" cy="12" r="2" fill="currentColor"/>
-          </svg>
+  <section class="proof-strip">
+    <article class="proof-card" id="oos-card">
+      <div class="card-kicker-row">
+        <div><span class="section-num">I. ECONOMETRIC PROOF</span><h2 class="card-heading">Out-of-Sample Calibration vs. Flat TVL Multiple</h2></div>
+        <span class="proof-badge" id="oos-win-badge">OOS Verified</span>
+      </div>
+      <div class="equation-box" id="model-equation"></div>
+      <table class="audit-table">
+        <thead><tr><th>Blind Validation Split</th><th class="num-col">1-Per-Ticker Curve</th><th class="num-col">Flat Multiple (0.23x)</th><th class="num-col">OOS Gain</th></tr></thead>
+        <tbody id="oos-tbody"></tbody>
+      </table>
+      <p class="proof-footnote" id="oos-footnote"></p>
+    </article>
+    <article class="proof-card" id="chart-card">
+      <div class="card-kicker-row">
+        <div><span class="section-num">II. EMPIRICAL ANCHOR SPACE</span><h2 class="card-heading">94 Canonical Traded Anchors vs. Pre-Token Radar (Log-Log)</h2></div>
+        <div class="chart-readout" id="chart-readout">Hover or click any mark to inspect TVL vs. valuation</div>
+      </div>
+      <div class="chart-legend" aria-hidden="true">
+        <span class="leg-item"><i class="swatch sw-anchor"></i>Anchor (94)</span>
+        <span class="leg-item"><i class="swatch sw-wl"></i>Watchlist &ge;$50M</span>
+        <span class="leg-item"><i class="swatch sw-disc"></i>Sub-$50M</span>
+        <span class="leg-item"><i class="swatch sw-curve"></i>Power-Law + Band</span>
+        <span class="leg-item"><i class="swatch sw-flat"></i>Flat Mult</span>
+      </div>
+      <svg id="comps-svg" class="comps-svg" viewBox="0 0 640 158"></svg>
+    </article>
+  </section>
+
+  <section class="toolbar">
+    <div class="toolbar-row">
+      <div class="cohort-tabs" id="cohort-tabs" role="tablist">
+        <button type="button" role="tab" class="cohort-tab is-active" data-cohort="all">Pre-Token Radar <span class="tab-n" id="cnt-all">200</span></button>
+        <button type="button" role="tab" class="cohort-tab" data-cohort="watchlist">Watchlist &ge;$50M <span class="tab-n" id="cnt-wl">40</span></button>
+        <button type="button" role="tab" class="cohort-tab" data-cohort="discovery">Sub-$50M <span class="tab-n" id="cnt-disc">160</span></button>
+        <button type="button" role="tab" class="cohort-tab" data-cohort="anchors">Traded Anchors <span class="tab-n" id="cnt-anch">94</span></button>
+      </div>
+      <div class="filter-inputs">
+        <div class="search-field">
+          <svg viewBox="0 0 16 16" class="search-ico" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4.8" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14.2 14.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <input type="search" id="q-input" placeholder="Search protocol, slug, category, chain... [/]" aria-label="Search" autocomplete="off">
         </div>
-        <div>
-          <div class="brand-title-row">
-            <span class="brand-title">TOKEN LAUNCH RADAR</span>
-            <span class="model-pill" id="hdr-model-pill">eb-radar-v1.1</span>
-          </div>
-          <p class="brand-sub" id="hdr-subtitle">Empirical-Bayes pre-token FDV model &amp; concrete farming playbooks from DefiLlama snapshot</p>
+        <select id="cat-select" aria-label="Category"><option value="all">All Categories</option></select>
+        <select id="chain-select" aria-label="Chain"><option value="all">All Chains</option></select>
+      </div>
+    </div>
+
+    <div class="toolbar-row toolbar-sub">
+      <div class="verdict-bar" id="verdict-bar">
+        <span class="ctrl-label">VERDICT</span>
+        <button type="button" class="v-btn is-active" data-verdict="ALL">All <span id="cnt-v-all">0</span></button>
+        <button type="button" class="v-btn v-farm" data-verdict="FARM">FARM <span id="cnt-v-farm">0</span></button>
+        <button type="button" class="v-btn v-thin" data-verdict="THIN">THIN <span id="cnt-v-thin">0</span></button>
+        <button type="button" class="v-btn v-skip" data-verdict="SKIP">SKIP <span id="cnt-v-skip">0</span></button>
+      </div>
+      <div class="sizing-capsule">
+        <span class="ctrl-label">DEPOSIT</span>
+        <div class="seg-group" id="deposit-group">
+          <button type="button" class="seg-btn" data-deposit="2500">$2,500</button>
+          <button type="button" class="seg-btn is-active" data-deposit="10000">$10,000</button>
+          <button type="button" class="seg-btn" data-deposit="50000">$50,000</button>
+        </div>
+        <span class="seg-sep"></span>
+        <span class="ctrl-label">HORIZON</span>
+        <div class="seg-group" id="horizon-group">
+          <button type="button" class="seg-btn" data-weeks="4">4w</button>
+          <button type="button" class="seg-btn is-active" data-weeks="8">8w</button>
+          <button type="button" class="seg-btn" data-weeks="16">16w</button>
         </div>
       </div>
-
-      <div class="mode-tabs" role="tablist" aria-label="Dataset view">
-        <button type="button" role="tab" id="tab-pretoken" class="mode-tab is-active" aria-selected="true" data-mode="pretoken">
-          <span class="dot dot-amber"></span>
-          <span>Pre-Token Launch Radar</span>
-          <span class="tab-count" id="tab-pretoken-count">0</span>
-        </button>
-        <button type="button" role="tab" id="tab-peers" class="mode-tab" aria-selected="false" data-mode="peers">
-          <span class="dot dot-cyan"></span>
-          <span>Traded Peer Comps</span>
-          <span class="tab-count" id="tab-peers-count">0</span>
-        </button>
+      <div class="toolbar-status">
+        <button type="button" class="reset-btn" id="reset-btn" hidden>Reset</button>
+        <span class="status-readout" id="row-status">Loading...</span>
       </div>
+    </div>
+  </section>
 
-      <div class="snapshot-meta" id="hdr-meta">
-        <div class="meta-chip">
-          <span class="meta-label">SNAPSHOT</span>
-          <strong class="meta-val" id="meta-asof">--</strong>
-        </div>
-        <div class="meta-chip">
-          <span class="meta-label">FLOOR</span>
-          <strong class="meta-val" id="meta-floor">$50M</strong>
-        </div>
-        <div class="meta-chip meta-verified" id="meta-parity" title="Client-side recomputation matches board.json implied_value_usd across all rows">
-          <span class="meta-label">MODEL PARITY</span>
-          <strong class="meta-val" id="meta-parity-val">VERIFIED</strong>
-        </div>
-      </div>
-    </header>
+  <main id="radar-board" class="board-panel" tabindex="-1"><div class="table-wrap" id="table-wrap"></div></main>
+</div>
 
-    <section class="kpi-strip" id="kpi-strip" aria-label="Radar summary telemetry"></section>
-
-    <section class="calibration-bar" id="calibration-bar" aria-label="Empirical category multiple calibration"></section>
-
-    <main id="radar-main" class="main-panel" tabindex="-1">
-      <section class="controls-bar" id="controls-bar" aria-label="Filter and sort controls">
-        <div class="search-box">
-          <svg viewBox="0 0 20 20" class="search-icon" aria-hidden="true">
-            <circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/>
-            <path d="M12.8 12.8 L17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-          </svg>
-          <input type="search" id="search-input" placeholder="Search protocol, slug, category, chain...  [ / ]" aria-label="Search protocols" autocomplete="off">
-        </div>
-
-        <div class="select-group">
-          <label class="sr-only" for="filter-category">Category</label>
-          <select id="filter-category" aria-label="Filter by category">
-            <option value="all">All Categories</option>
-          </select>
-
-          <label class="sr-only" for="filter-chain">Chain</label>
-          <select id="filter-chain" aria-label="Filter by chain">
-            <option value="all">All Chains</option>
-          </select>
-        </div>
-
-        <div class="tier-pills" id="tier-pills" role="group" aria-label="Candidate tier filter">
-          <button type="button" class="pill-btn is-active" data-tier="all">All Pre-Token <span class="pill-n" id="pill-n-all"></span></button>
-          <button type="button" class="pill-btn" data-tier="watchlist">Watchlist &ge;$50M <span class="pill-n" id="pill-n-wl"></span></button>
-          <button type="button" class="pill-btn" data-tier="early">Early Gems &lt;$50M <span class="pill-n" id="pill-n-gem"></span></button>
-        </div>
-
-        <div class="controls-right">
-          <button type="button" class="reset-btn" id="reset-filters-btn" hidden>Reset Filters</button>
-          <span class="result-counter" id="result-counter">0 shown</span>
-        </div>
-      </section>
-
-      <div class="active-filters-row" id="active-filters-row" hidden></div>
-
-      <section class="table-card" id="table-container" aria-live="polite"></section>
-    </main>
-  </div>
-
-  <div class="drawer-backdrop" id="drawer-backdrop" hidden>
-    <aside class="detail-drawer" id="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"></aside>
-  </div>
-
-  <script src="../data.js"></script>
-  <script defer src="app.js"></script>
+<div class="sheet-backdrop" id="sheet-backdrop" hidden>
+  <aside class="tear-sheet" id="tear-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title"></aside>
+</div>
+<script src="../data.js"></script>
+<script src="model.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

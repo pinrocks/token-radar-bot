@@ -1,529 +1,378 @@
-// Token Launch Radar — Interactive Offline Client (app.js)
-// Reads window.RADAR_DATA produced by main.ts, verifies client-side valuation parity
-// against board.json, separates pre-token candidates from traded peer comps, and
-// renders the valuation waterfall + concrete 5-step farming playbook per protocol.
+// Token Launch Radar — Interactive Client (dashboard/app.js)
+// Shares globalThis.RadarModel (dashboard/model.js) with main.ts so one model prices board.json and UI.
 (function () {
-  'use strict';
+'use strict';
+const D = window.RADAR_DATA, M = globalThis.RadarModel || null;
+if (!D || !Array.isArray(D.rows)) return;
+const defs = D.defaults || {};
+const st = { cohort: 'all', verdict: 'ALL', category: 'all', chain: 'all', q: '', depositUsd: defs.deposit_usd || 10000, weeks: defs.weeks || 8, sort: 'rank', dir: 1, anchorSort: 'mcap_usd', anchorDir: -1, selected: null };
+const $ = (id) => document.getElementById(id), txt = (id, v) => { $(id).textContent = v; };
+const svg = $('comps-svg'), backdrop = $('sheet-backdrop'), sheet = $('tear-sheet');
+const on = (el, ev, fn) => el.addEventListener(ev, fn);
+const vCls = (v) => v === 'FARM' ? 'b-farm' : v === 'THIN' ? 'b-thin' : 'b-skip';
 
-  var DATA = window.RADAR_DATA;
-  if (!DATA || !Array.isArray(DATA.rows)) return;
+const fUsd = (n) => {
+  if (n == null || !isFinite(n)) return 'n/a';
+  const a = Math.abs(n), s = n < 0 ? '-' : '';
+  return a >= 1e9 ? s + '$' + (a / 1e9).toFixed(2) + 'B' : a >= 1e6 ? s + '$' + (a / 1e6).toFixed(1) + 'M' : a >= 1e3 ? s + '$' + (a / 1e3).toFixed(1) + 'K' : s + '$' + Math.round(a).toLocaleString('en-US');
+};
+const fSgn = (n) => {
+  const a = Math.abs(n), s = n > 0 ? '+' : n < 0 ? '-' : '';
+  return a >= 1e6 ? s + '$' + (a / 1e6).toFixed(2) + 'M' : a >= 1e3 ? s + '$' + (a / 1e3).toFixed(1) + 'K' : s + '$' + (a >= 100 ? Math.round(a).toLocaleString('en-US') : a.toFixed(2));
+};
+const fEx = (n) => (n < 0 ? '-$' : '$') + Math.round(Math.abs(n)).toLocaleString('en-US');
+const fCst = (n) => { const a = Math.abs(n); return (n < 0 ? '-$' : '$') + (a >= 1000 ? Math.round(a).toLocaleString('en-US') : a.toFixed(2)); };
+const fMul = (n) => (n == null || !isFinite(n)) ? 'n/a' : n.toFixed(2) + 'x';
+const fPct = (n) => (n == null || !isFinite(n)) ? 'unreported' : (n > 0 ? '+' : '') + n.toFixed(1) + '%';
 
-  var STEP_PHASES = [
-    '01 WALLET & GAS ISOLATION',
-    '02 CORE LIQUIDITY DEPLOYMENT',
-    '03 RECURRING EPOCH CADENCE',
-    '04 SNAPSHOT RETENTION & CAP',
-    '05 VERIFY & REVOKE HYGIENE'
-  ];
-
-  var state = { mode: 'pretoken', q: '', category: 'all', chain: 'all', tier: 'all', sort: 'rank', dir: 1, peerSort: 'mcap_usd', peerDir: -1, selected: null };
-  var byId = function (id) { return document.getElementById(id); };
-  var dom = {
-    modelPill: byId('hdr-model-pill'), asOf: byId('meta-asof'), floor: byId('meta-floor'), parityVal: byId('meta-parity-val'),
-    tabPretoken: byId('tab-pretoken'), tabPeers: byId('tab-peers'),
-    tabPretokenCount: byId('tab-pretoken-count'), tabPeersCount: byId('tab-peers-count'),
-    pillAll: byId('pill-n-all'), pillWl: byId('pill-n-wl'), pillGem: byId('pill-n-gem'),
-    kpiStrip: byId('kpi-strip'), calibrationBar: byId('calibration-bar'),
-    searchInput: byId('search-input'), filterCategory: byId('filter-category'), filterChain: byId('filter-chain'),
-    tierPills: byId('tier-pills'), resetBtn: byId('reset-filters-btn'), resultCounter: byId('result-counter'),
-    activeFiltersRow: byId('active-filters-row'), tableContainer: byId('table-container'),
-    drawerBackdrop: byId('drawer-backdrop'), detailDrawer: byId('detail-drawer')
-  };
-
-  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
-  function fmtUsd(n) {
-    if (n === null || n === undefined || !isFinite(n)) return 'n/a';
-    var abs = Math.abs(n), sign = n < 0 ? '-' : '';
-    if (abs >= 1e9) return sign + '$' + (abs / 1e9).toFixed(2) + 'B';
-    if (abs >= 1e6) return sign + '$' + (abs / 1e6).toFixed(1) + 'M';
-    if (abs >= 1e3) return sign + '$' + (abs / 1e3).toFixed(1) + 'K';
-    return sign + '$' + Math.round(abs).toLocaleString('en-US');
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'text') el.textContent = v;
+    else if (k.startsWith('on') && typeof v === 'function') on(el, k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : String(v));
   }
-  function fmtWholeUsd(n) { return (n === null || n === undefined || !isFinite(n)) ? 'n/a' : '$' + Math.round(n).toLocaleString('en-US'); }
-  function fmtMult(n) { return (n === null || n === undefined || !isFinite(n)) ? 'n/a' : n.toFixed(2) + 'x'; }
-  function fmtFactor(n) { return (n === null || n === undefined || !isFinite(n)) ? '1.000x' : n.toFixed(3) + 'x'; }
-  function fmtPct(n) { return (n === null || n === undefined || !isFinite(n)) ? 'unreported' : (n > 0 ? '+' : '') + n.toFixed(2) + '%'; }
-  function fmtTenure(d) {
-    if (d === null || d === undefined || !isFinite(d)) return 'unlisted';
-    return d >= 365 ? (d / 365).toFixed(1) + 'y (' + Math.round(d) + 'd)' : Math.round(d) + 'd';
+  for (const c of kids) {
+    if (c == null || c === false) continue;
+    if (Array.isArray(c)) c.forEach((x) => x && el.appendChild(typeof x === 'string' ? document.createTextNode(x) : x));
+    else el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
   }
-  function fmtShortTenure(d) {
-    if (d === null || d === undefined || !isFinite(d)) return 'unlisted';
-    return d >= 365 ? (d / 365).toFixed(1) + 'y' : Math.round(d) + 'd';
-  }
+  return el;
+}
+const sp = (c, t) => h('span', c ? { class: c, text: t } : { text: t });
+const bdg = (c, t) => sp('badge ' + c, t);
+const dv = (c, ...k) => h('div', c ? { class: c } : null, ...k);
+const td = (c, x) => typeof x === 'string' ? h('td', c ? { class: c, text: x } : { text: x }) : h('td', c ? { class: c } : null, x);
+const btn = (c, t, onclick) => h('button', { type: 'button', class: c, text: t, onclick });
+const kv = (l, v, c, tot) => dv('kv-line' + (tot ? ' kv-total' : ''), sp('', l), sp('mono' + (c ? ' ' + c : ''), v));
+const svgEl = (t, a) => { const n = document.createElementNS(svg.namespaceURI, t); if (a) for (const [k, v] of Object.entries(a)) if (v != null) n.setAttribute(k, String(v)); return n; };
 
-  // Recomputes implied launch FDV from snapshot fields + model_spec to verify exact parity with board.json.
-  function recomputeImpliedValue(row, spec) {
-    if (!spec || !row || !row.waterfall) return row ? row.implied_value_usd : 0;
-    var tvl = Math.max(1, row.tvl_usd), sb = spec.scale_bounds || [0.72, 1.18];
-    var scale = clamp(Math.pow(tvl / spec.scale_pivot_usd, spec.scale_exponent), sb[0], sb[1]);
-    var d7 = typeof row.change_7d === 'number' && isFinite(row.change_7d) ? row.change_7d : 0;
-    var growth = 1 + spec.growth_max_swing * Math.tanh(d7 / spec.growth_scale_pct);
-    var effAge = row.tenure_days === null || row.tenure_days === undefined ? spec.unknown_tenure_days : row.tenure_days;
-    var tenure = 0.82 + 0.33 * (1 - Math.exp(-Math.max(0, effAge) / spec.tenure_half_life_days));
-    var chains = Math.max(1, (row.chains || []).length);
-    var chainF = 1 + Math.min(spec.chain_bonus_cap, 0.03 * Math.log2(chains));
-    return clamp(Math.round(tvl * row.waterfall.category_multiple * scale * growth * tenure * chainF), 1, 100000000000000);
+const cache = {};
+function getLiveFarmPlan(r, dep, wks) {
+  const k = r.slug + ':' + dep + ':' + wks;
+  return cache[k] || (cache[k] = (M && M.buildDepositFarmPlan) ? M.buildDepositFarmPlan(r, r.implied_value_usd, { deposit_usd: dep, weeks: wks, as_of: D.as_of }) : r.default_farm);
+}
+function expectedCurveUsd(tvl) {
+  const ec = D.econometrics;
+  return ec.smearing_factor * Math.exp(ec.mean_log_mcap + ec.beta_tvl * (Math.log(Math.max(1, tvl)) - ec.mean_log_tvl));
+}
+function verifySharedEngineParity() {
+  let ok = 0;
+  for (const r of D.rows) {
+    const dc = r.decomposition, rec = dc.base_curve_usd * dc.category_factor * dc.growth_factor * dc.seasoning_factor;
+    const fOk = !M || !r.default_farm || Math.abs(getLiveFarmPlan(r, r.default_farm.deposit_usd, r.default_farm.weeks).net_ev_usd - r.default_farm.net_ev_usd) < 0.05;
+    if (Math.abs(rec - r.implied_value_usd) <= Math.max(5, r.implied_value_usd * 0.002) && fOk) ok++;
   }
+  return ok + ' / ' + D.rows.length + ' EXACT';
+}
 
-  function verifyBoardParity(rows, spec) {
-    var matched = 0;
-    for (var i = 0; i < rows.length; i++) {
-      if (Math.abs(recomputeImpliedValue(rows[i], spec) - rows[i].implied_value_usd) <= Math.max(2, Math.round(rows[i].implied_value_usd * 0.0005))) matched++;
+function renderMastheadAndOos() {
+  const s = D.summary, ec = D.econometrics, loo = ec.loo_cv, wf = ec.walk_forward_cv;
+  txt('model-tag', D.model_version + ' · model.js');
+  txt('stat-asof', D.as_of);
+  txt('stat-source', s.total_snapshot_protocols + ' protocols · $' + Math.round(D.floor_usd / 1e6) + 'M floor');
+  txt('stat-coverage', s.watchlist_covered + '/' + s.watchlist_total + ' + ' + s.sub_floor_discovery_rows);
+  txt('stat-discovery', s.watchlist_covered + ' watchlist + ' + s.sub_floor_discovery_rows + ' sub-$50M');
+  txt('stat-parity', verifySharedEngineParity());
+  txt('stat-anchors', ec.n_anchors + ' 1-per-ticker comps');
+  txt('model-equation', ec.equation);
+  txt('oos-win-badge', 'LOO -' + loo.mdae_improvement_pct.toFixed(1) + '% · Walk-Fwd -' + wf.mdae_improvement_pct.toFixed(1) + '% MdAE');
+  const tb = $('oos-tbody'); tb.textContent = '';
+  const fmtErr = (x) => x.log_mdae.toFixed(3) + ' MdAE (' + x.mult_mdae_x.toFixed(2) + 'x) · ' + x.log_rmse.toFixed(2) + ' RMSE';
+  for (const [lbl, m, b, gMd, gMa] of [
+    ['LOO-CV (n=' + loo.n_anchors + ' tickers)', loo.selected_model, loo.baseline_flat, loo.mdae_improvement_pct, loo.mae_improvement_pct],
+    ['Walk-Fwd >=' + wf.split_listed_at + ' (' + wf.n_train_initial + '->' + wf.n_test_out_of_time + ')', wf.comps_curve, wf.baseline_flat, wf.mdae_improvement_pct, wf.mae_improvement_pct]
+  ]) tb.appendChild(h('tr', null, td('', lbl), td('num-col', fmtErr(m)), td('num-col muted', fmtErr(b)), td('num-col', sp('gain-pill', '-' + gMd.toFixed(1) + '% MdAE / -' + gMa.toFixed(1) + '% MAE'))));
+  if (Array.isArray(loo.nested_steps)) txt('oos-footnote', 'LOO log-MAE (' + loo.nested_steps.map((x) => 'M' + x.level + ':' + x.log_mae.toFixed(3)).join('->') + '). ' + (defs.bootstrap_refits || 200) + ' bootstrap refits give P10–P90 & [rank_best..rank_worst]. DefiLlama records no token (null fields), not proof none exists.');
+}
+
+function renderCalibrationSvg() {
+  svg.textContent = '';
+  const W = 640, H = 158, pL = 44, pR = 12, pT = 10, pB = 20, pW = W - pL - pR, pH = H - pT - pB;
+  const minX = 6.6, maxX = 10.3, minY = 5.3, maxY = 9.7;
+  const sx = (v) => pL + ((Math.min(maxX, Math.max(minX, v)) - minX) / (maxX - minX)) * pW;
+  const sy = (v) => pT + pH - ((Math.min(maxY, Math.max(minY, v)) - minY) / (maxY - minY)) * pH;
+  const lb = { 6: '$1M', 7: '$10M', 8: '$100M', 9: '$1B', 10: '$10B' };
+  for (const [vals, isX] of [[[7, 8, 9, 10], 1], [[6, 7, 8, 9], 0]]) for (const g of vals) {
+    const c = (isX ? sx : sy)(g).toFixed(1), t = svgEl('text', isX ? { x: c, y: H - 4, 'text-anchor': 'middle', class: 'svg-axis-lbl' } : { x: pL - 4, y: (+c + 3).toFixed(1), 'text-anchor': 'end', class: 'svg-axis-lbl' });
+    svg.appendChild(svgEl('line', isX ? { x1: c, y1: pT, x2: c, y2: pT + pH, class: 'svg-grid' } : { x1: pL, y1: c, x2: W - pR, y2: c, class: 'svg-grid' }));
+    t.textContent = lb[g] + (isX ? ' TVL' : ''); svg.appendChild(t);
+  }
+  const fx = sx(Math.log10(D.floor_usd)), ft = svgEl('text', { x: (fx + 4).toFixed(1), y: pT + 9, class: 'svg-axis-lbl' });
+  svg.appendChild(svgEl('line', { x1: fx.toFixed(1), y1: pT, x2: fx.toFixed(1), y2: pT + pH, class: 'svg-floor' }));
+  ft.textContent = '$50M Floor'; svg.appendChild(ft);
+
+  const flatM = D.econometrics.flat_median_multiple, bT = [], bB = [], fP = [], flP = [];
+  for (let i = 0; i <= 24; i++) {
+    const lx = minX + (i / 24) * (maxX - minX), tvl = Math.pow(10, lx), ly = Math.log10(expectedCurveUsd(tvl)), x = sx(lx).toFixed(1);
+    fP.push(x + ',' + sy(ly).toFixed(1)); flP.push(x + ',' + sy(Math.log10(Math.max(1, flatM * tvl))).toFixed(1));
+    bT.push(x + ',' + sy(ly + 0.25).toFixed(1)); bB.unshift(x + ',' + sy(ly - 0.25).toFixed(1));
+  }
+  svg.appendChild(svgEl('polygon', { points: bT.concat(bB).join(' '), class: 'svg-band' }));
+  svg.appendChild(svgEl('polyline', { points: flP.join(' '), class: 'svg-flat-line' }));
+  svg.appendChild(svgEl('polyline', { points: fP.join(' '), class: 'svg-fit-line' }));
+
+  for (const a of D.anchors) {
+    if (a.tvl_usd <= 0 || a.mcap_usd <= 0) continue;
+    const c = svgEl('circle', { cx: sx(Math.log10(a.tvl_usd)).toFixed(1), cy: sy(Math.log10(a.mcap_usd)).toFixed(1), r: '2.6', class: 'pt-anchor' });
+    on(c, 'mouseenter', () => txt('chart-readout', 'Anchor $' + a.symbol + ' (' + a.name + '): TVL ' + fUsd(a.tvl_usd) + ' · MCap ' + fUsd(a.mcap_usd) + ' (' + fMul(a.mcap_tvl_multiple) + ')'));
+    on(c, 'click', () => { st.cohort = 'anchors'; st.q = $('q-input').value = a.symbol; syncHash(); renderAll(); });
+    svg.appendChild(c);
+  }
+  for (const r of D.rows) {
+    const px = sx(Math.log10(r.tvl_usd)), py = sy(Math.log10(r.implied_value_usd)), sel = st.selected === r.slug;
+    if (sel) {
+      svg.appendChild(svgEl('line', { x1: px.toFixed(1), y1: pT, x2: px.toFixed(1), y2: pT + pH, class: 'svg-cross' }));
+      svg.appendChild(svgEl('line', { x1: pL, y1: py.toFixed(1), x2: W - pR, y2: py.toFixed(1), class: 'svg-cross' }));
     }
-    return { matched: matched, total: rows.length };
+    const d = sel ? 4.8 : r.is_watchlist ? 3.2 : 2.5;
+    const pts = r.is_watchlist ? `${px},${py - d} ${px + d},${py} ${px},${py + d} ${px - d},${py}` : `${px},${py - d} ${px + d},${py + d} ${px - d},${py + d}`;
+    const node = svgEl('polygon', { points: pts, 'data-slug': r.slug, class: (r.is_watchlist ? 'pt-wl' : 'pt-disc') + (sel ? ' pt-active' : '') });
+    on(node, 'mouseenter', () => txt('chart-readout', '#' + r.rank + ' ' + r.name + ': TVL ' + fUsd(r.tvl_usd) + ' -> Implied ' + fUsd(r.implied_value_usd) + ' (' + fMul(r.implied_tvl_multiple) + ')'));
+    on(node, 'click', () => openSheet(r.slug));
+    svg.appendChild(node);
   }
+}
 
-  function parsePlaybookStep(rawStep, index) {
-    var text = String(rawStep || '').trim(), tags = [];
-    var m = text.match(/\(([^()]+)\)\.?\s*$/);
-    if (m && m[1] && (m[1].indexOf(':') >= 0 || m[1].indexOf(';') >= 0)) {
-      m[1].split(';').forEach(function (part) { var c = part.trim(); if (c) tags.push(c); });
-      text = text.slice(0, m.index).trim();
-      if (text && !/[.]$/.test(text)) text += '.';
-    }
-    return { phase: STEP_PHASES[index] || ('0' + (index + 1) + ' EXECUTION STEP'), body: text, tags: tags };
-  }
-
-  function h(tag, attrs) {
-    var node = document.createElement(tag);
-    if (attrs) {
-      Object.keys(attrs).forEach(function (key) {
-        var val = attrs[key];
-        if (val === null || val === undefined || val === false) return;
-        if (key === 'class') node.className = val;
-        else if (key === 'text') node.textContent = val;
-        else if (key.slice(0, 2) === 'on' && typeof val === 'function') node.addEventListener(key.slice(2), val);
-        else if (val === true) node.setAttribute(key, '');
-        else node.setAttribute(key, String(val));
-      });
-    }
-    for (var i = 2; i < arguments.length; i++) {
-      var child = arguments[i];
-      if (child === null || child === undefined || child === false) continue;
-      if (Array.isArray(child)) child.forEach(function (c) { if (c) node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
-      else node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
-    }
-    return node;
-  }
-
-  function span(cls, t) { return h('span', cls ? { class: cls, text: t } : { text: t }); }
-  function div(cls) {
-    var args = ['div', cls ? { class: cls } : null];
-    for (var i = 1; i < arguments.length; i++) args.push(arguments[i]);
-    return h.apply(null, args);
-  }
-
-  function filterCandidateRows(rows, st) {
-    var q = st.q.trim().toLowerCase();
-    return rows.filter(function (r) {
-      if (st.category !== 'all' && r.category_label !== st.category) return false;
-      if (st.chain !== 'all' && (!r.chains || r.chains.indexOf(st.chain) < 0)) return false;
-      if (st.tier === 'watchlist' && !r.is_watchlist) return false;
-      if (st.tier === 'early' && r.is_watchlist) return false;
-      return !q || (r.name + ' ' + r.slug + ' ' + r.category_label + ' ' + (r.chains || []).join(' ')).toLowerCase().indexOf(q) >= 0;
-    });
-  }
-
-  function sortCandidateRows(rows, key, dir) {
-    var valOf = function (r) {
-      if (key === 'name') return r.name.toLowerCase();
-      if (key === 'category_multiple') return r.waterfall ? r.waterfall.category_multiple : 0;
-      if (key === 'change_7d') return r.change_7d === null ? -999999 : r.change_7d;
-      if (key === 'tenure_days') return r.tenure_days === null ? -1 : r.tenure_days;
-      return r[key] !== undefined ? r[key] : r.rank;
-    };
-    return rows.slice().sort(function (a, b) {
-      var av = valOf(a), bv = valOf(b);
-      return av < bv ? -dir : av > bv ? dir : a.rank - b.rank;
-    });
-  }
-
-  function filterTradedPeers(peers, st) {
-    var q = st.q.trim().toLowerCase();
-    return peers.filter(function (p) {
-      if (st.category !== 'all' && p.category !== st.category) return false;
-      if (st.chain !== 'all' && (!p.chains || p.chains.indexOf(st.chain) < 0)) return false;
-      return !q || (p.name + ' ' + p.slug + ' ' + (p.symbol || '') + ' ' + p.category + ' ' + (p.chains || []).join(' ')).toLowerCase().indexOf(q) >= 0;
-    });
-  }
-
-  function sortTradedPeers(peers, key, dir) {
-    var valOf = function (p) {
-      if (key === 'name') return p.name.toLowerCase();
-      if (key === 'change_7d') return p.change_7d === null ? -999999 : p.change_7d;
-      return p[key] !== undefined ? p[key] : p.mcap_usd;
-    };
-    return peers.slice().sort(function (a, b) {
-      var av = valOf(a), bv = valOf(b);
-      return av < bv ? -dir : av > bv ? dir : (a.slug < b.slug ? -1 : 1);
-    });
-  }
-
-  function renderKpiStrip(data, parity) {
-    var s = data.summary;
-    var yields = data.rows.map(function (r) { return r.yield_per_1k_tvl; }).sort(function (a, b) { return a - b; });
-    var medYield = yields.length ? yields[Math.floor(yields.length / 2)] : 0;
-    dom.kpiStrip.textContent = '';
-    [
-      ['accent-emerald', 'Watchlist Coverage', '100% FLOOR', 'tag-emerald', s.watchlist_covered + ' / ' + s.watchlist_total, 'All >=$' + Math.round(data.floor_usd / 1e6) + 'M pre-token watchlist slugs ranked'],
-      ['accent-amber', 'Pre-Token Candidates', s.early_gem_rows + ' EARLY GEMS', 'tag-amber', String(s.board_rows), s.watchlist_covered + ' watchlist + ' + s.early_gem_rows + ' sub-$50M candidates'],
-      ['accent-amber', 'Aggregate Implied FDV', 'RANK 1..' + s.board_rows, 'tag-amber', fmtUsd(s.total_implied_fdv_usd), 'Board parity: ' + parity.matched + '/' + parity.total + ' rows verified'],
-      ['accent-emerald', 'Est. Community Pool', '$' + medYield.toFixed(1) + ' / $1K TVL', 'tag-emerald', fmtUsd(s.total_est_pool_usd), 'Modeled 3.5%-6.5% initial float distribution'],
-      ['accent-cyan', 'Traded Peer Calibration', 'PRIOR ' + fmtMult(s.global_shrunk_prior_multiple), 'tag-cyan', s.traded_peer_rows + ' Peers', 'Live-token comps set aside out of ' + s.total_snapshot_protocols + ' total']
-    ].forEach(function (c) {
-      dom.kpiStrip.appendChild(div('kpi-card ' + c[0], div('kpi-head', span('kpi-label', c[1]), span('kpi-tag ' + c[3], c[2])), div('kpi-value', c[4]), div('kpi-foot', c[5])));
-    });
-  }
-
-  function renderCalibrationStrip(data) {
-    dom.calibrationBar.textContent = '';
-    var spec = data.model_spec, space = spec.shrinkage_space ? spec.shrinkage_space + ' ' : '';
-    var list = (data.tradedPeerSummary || []).slice(0, 8);
-    if (state.category !== 'all' && !list.some(function (c) { return c.category === state.category; })) {
-      var extra = (data.tradedPeerSummary || []).filter(function (c) { return c.category === state.category; })[0];
-      if (extra) list = list.slice(0, 7).concat([extra]);
-    }
-    var chipsRow = div('cal-chips', list.map(function (cal) {
-      var sel = state.category === cal.category;
-      return h('button', {
-        type: 'button', class: 'cal-chip' + (sel ? ' is-selected' : ''),
-        title: cal.category + ': shrunk ' + fmtMult(cal.shrunk_multiple) + ' (IQR ' + fmtMult(cal.p25_multiple) + '-' + fmtMult(cal.p75_multiple) + ', n=' + cal.sample_count + ')',
-        onclick: function () { state.category = sel ? 'all' : cal.category; dom.filterCategory.value = state.category; syncUrlHash(); renderMainView(); }
-      }, span('cal-cat', cal.category), span('cal-mult', fmtMult(cal.shrunk_multiple)), span('cal-peers', 'n=' + cal.sample_count));
+function makeHead(cols, isAnc) {
+  const ck = isAnc ? st.anchorSort : st.sort, cd = isAnc ? st.anchorDir : st.dir;
+  return h('thead', null, h('tr', null, cols.map(([lbl, key, r]) => {
+    if (!key) return h('th', r ? { class: 'r-align', text: lbl } : { text: lbl });
+    const act = ck === key;
+    return h('th', r ? { class: 'r-align' } : null, btn('sort-th' + (act ? ' is-sorted' : ''), lbl + (act ? (cd > 0 ? ' \u2191' : ' \u2193') : ''), () => {
+      if (isAnc) { st.anchorDir = st.anchorSort === key ? -st.anchorDir : (key === 'name' ? 1 : -1); st.anchorSort = key; }
+      else { st.dir = st.sort === key ? -st.dir : (key === 'rank' || key === 'name' || key === 'breakeven_bps' ? 1 : -1); st.sort = key; }
+      syncHash(); renderBoardView();
     }));
-    dom.calibrationBar.appendChild(div('cal-top',
-      div('cal-title-group', span('cal-title', 'Empirical Category Multiples (' + space + 'EB k=' + spec.prior_strength_k + ')'), h('code', { class: 'cal-equation', text: 'FDV = TVL x CatMult_EB x Scale(TVL^-0.075) x Flow7d(tanh) x Tenure(exp) x ChainBreadth' })),
-      span('cal-note', 'Winsorized [' + fmtMult(spec.winsor_floor_multiple) + '..' + fmtMult(spec.winsor_cap_multiple) + '] across ' + data.summary.traded_peer_rows + ' peers · click category to filter')
-    ));
-    dom.calibrationBar.appendChild(chipsRow);
-  }
+  })));
+}
 
-  function makeSortHeader(label, key, alignRight, isPeerTable) {
-    var activeKey = isPeerTable ? state.peerSort : state.sort, activeDir = isPeerTable ? state.peerDir : state.dir;
-    var isSorted = activeKey === key;
-    return h('th', { scope: 'col', class: alignRight ? 'align-right' : '' },
-      h('button', {
-        type: 'button', class: 'sort-btn' + (isSorted ? ' is-sorted' : ''),
-        onclick: function () {
-          if (isPeerTable) { state.peerDir = state.peerSort === key ? -state.peerDir : (key === 'name' ? 1 : -1); state.peerSort = key; }
-          else { state.dir = state.sort === key ? -state.dir : ((key === 'rank' || key === 'name') ? 1 : -1); state.sort = key; }
-          syncUrlHash(); renderMainView();
-        }
-      }, label + (isSorted ? (activeDir > 0 ? ' ^' : ' v') : ''))
-    );
-  }
+function renderAnchorsTable() {
+  const q = st.q.trim().toLowerCase();
+  const list = D.anchors.filter((a) => (st.category === 'all' || a.category === st.category) && (st.chain === 'all' || a.chains.includes(st.chain)) && (!q || (a.symbol + ' ' + a.name + ' ' + a.slug + ' ' + a.category + ' ' + a.chains.join(' ')).toLowerCase().includes(q)))
+    .map((a) => { const fit = expectedCurveUsd(a.tvl_usd); return { a, fit, resid: Math.log(a.mcap_usd / fit) }; })
+    .sort((x, y) => {
+      const k = st.anchorSort, d = st.anchorDir;
+      const av = k === 'name' ? x.a.name.toLowerCase() : k === 'fitted_usd' ? x.fit : (x.a[k] ?? -1e18);
+      const bv = k === 'name' ? y.a.name.toLowerCase() : k === 'fitted_usd' ? y.fit : (y.a[k] ?? -1e18);
+      return av < bv ? -d : av > bv ? d : 0;
+    });
+  txt('row-status', list.length + ' of ' + D.anchors.length + ' canonical traded anchors');
+  if (!list.length) return dv('empty-box', h('strong', { text: 'No traded anchors match filters.' }), h('p', { text: 'Reset filters to inspect all 94 canonical families.' }), btn('reset-btn', 'Reset', resetFilters));
+  return h('table', { class: 'radar-table' },
+    makeHead([['Ticker', null, 0], ['Canonical Traded Anchor (1-Per-Ticker)', 'name', 0], ['Category', null, 0], ['Aggregated TVL', 'tvl_usd', 1], ['Live MCap', 'mcap_usd', 1], ['MCap/TVL', 'mcap_tvl_multiple', 1], ['Curve Fit', 'fitted_usd', 1], ['Log Resid', null, 1], ['7d Flow', 'change_7d', 1]], true),
+    h('tbody', null, list.map(({ a, fit, resid }) => h('tr', null,
+      td('mono', bdg('b-wl', '$' + a.symbol)),
+      td('', dv('p-cell', dv('p-top', sp('p-name', a.name), a.merged_count > 1 && bdg('b-disc', a.merged_count + ' merged')), sp('p-sub', a.chains.slice(0, 3).join(', ') + (a.chains.length > 3 ? ' +' + (a.chains.length - 3) : '') + ' · Set aside from pre-token board'))),
+      td('', bdg('b-cat', a.category)), td('mono r-align', fUsd(a.tvl_usd)), td('mono r-align', fUsd(a.mcap_usd)),
+      td('mono r-align', fMul(a.mcap_tvl_multiple)), td('mono r-align', fUsd(fit)),
+      td('mono r-align muted', (resid >= 0 ? '+' : '') + resid.toFixed(2)),
+      td('mono r-align ' + (a.change_7d == null ? 'muted' : a.change_7d >= 0 ? 'pos' : 'neg'), fPct(a.change_7d))
+    )))
+  );
+}
 
-  function renderRadarTable(rows) {
-    if (!rows.length) return div('empty-state', h('h3', { text: 'No pre-token candidates match current filters' }), h('button', { type: 'button', class: 'reset-btn', text: 'Clear All Filters', onclick: resetAllFilters }));
-    var maxFdv = 1;
-    rows.forEach(function (r) { if (r.implied_value_usd > maxFdv) maxFdv = r.implied_value_usd; });
-    var tbody = h('tbody', null, rows.map(function (r) {
-      var dCls = r.change_7d === null ? 'delta-flat' : (r.change_7d >= 0 ? 'delta-pos' : 'delta-neg');
-      var barPct = Math.max(4, Math.round(Math.pow(r.implied_value_usd / maxFdv, 0.55) * 100));
-      var chText = r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') + (r.chains.length > 2 ? ' +' + (r.chains.length - 2) : '') : 'Multi-Chain';
+const syncBtns = (id, sel, attr, val) => $(id).querySelectorAll(sel).forEach((b) => b.classList.toggle('is-active', b.getAttribute(attr) == val));
+
+function renderBoardView() {
+  txt('cnt-all', D.rows.length); txt('cnt-wl', D.summary.watchlist_covered); txt('cnt-disc', D.summary.sub_floor_discovery_rows); txt('cnt-anch', D.anchors.length);
+  syncBtns('cohort-tabs', '.cohort-tab', 'data-cohort', st.cohort);
+  syncBtns('deposit-group', '.seg-btn', 'data-deposit', st.depositUsd);
+  syncBtns('horizon-group', '.seg-btn', 'data-weeks', st.weeks);
+  $('reset-btn').hidden = !(st.cohort !== 'all' || st.verdict !== 'ALL' || st.category !== 'all' || st.chain !== 'all' || st.q.trim() !== '');
+  txt('stat-sizing', '$' + st.depositUsd.toLocaleString('en-US') + ' · ' + st.weeks + 'w');
+
+  const wrap = $('table-wrap');
+  if (st.cohort === 'anchors') { $('verdict-bar').style.opacity = '0.45'; wrap.textContent = ''; wrap.appendChild(renderAnchorsTable()); return; }
+  $('verdict-bar').style.opacity = '1';
+
+  const q = st.q.trim().toLowerCase();
+  const base = D.rows.filter((r) => (st.cohort !== 'watchlist' || r.is_watchlist) && (st.cohort !== 'discovery' || !r.is_watchlist) && (st.category === 'all' || r.category === st.category) && (st.chain === 'all' || r.chains.includes(st.chain)) && (!q || (r.name + ' ' + r.slug + ' ' + r.category_label + ' ' + r.chains.join(' ')).toLowerCase().includes(q)));
+  const vc = { ALL: base.length, FARM: 0, THIN: 0, SKIP: 0 };
+  const enriched = base.map((r) => { const fp = getLiveFarmPlan(r, st.depositUsd, st.weeks); vc[fp.verdict]++; return { r, fp }; });
+  txt('cnt-v-all', '(' + vc.ALL + ')'); txt('cnt-v-farm', '(' + vc.FARM + ')'); txt('cnt-v-thin', '(' + vc.THIN + ')'); txt('cnt-v-skip', '(' + vc.SKIP + ')');
+  txt('stat-verdicts', vc.FARM + ' FARM · ' + vc.THIN + ' THIN · ' + vc.SKIP + ' SKIP');
+  syncBtns('verdict-bar', '.v-btn', 'data-verdict', st.verdict);
+
+  const shown = (st.verdict === 'ALL' ? enriched : enriched.filter((x) => x.fp.verdict === st.verdict)).sort((a, b) => {
+    const k = st.sort, d = st.dir;
+    const val = (x) => k === 'name' ? x.r.name.toLowerCase() : k === 'net_ev_usd' ? x.fp.net_ev_usd : k === 'breakeven_bps' ? x.fp.breakeven_bps : k === 'change_7d' ? (x.r.change_7d ?? -999999) : k === 'age_days' ? (x.r.age_days ?? -1) : x.r[k];
+    const av = val(a), bv = val(b);
+    return av < bv ? -d : av > bv ? d : a.r.rank - b.r.rank;
+  });
+
+  txt('row-status', shown.length + ' shown · ' + vc.FARM + ' FARM @ $' + (st.depositUsd / 1000) + 'k/' + st.weeks + 'w');
+  wrap.textContent = '';
+  if (!shown.length) { wrap.appendChild(dv('empty-box', h('strong', { text: 'No protocols match active filters.' }), h('p', { text: 'Adjust deposit sizing, verdict filter, or cohort.' }), btn('reset-btn', 'Reset', resetFilters))); return; }
+
+  let minL = 5.6, maxL = 9.0;
+  for (const r of D.rows) { minL = Math.min(minL, Math.log10(Math.max(1, r.p10_value_usd))); maxL = Math.max(maxL, Math.log10(Math.max(1, r.p90_value_usd))); }
+  const pos = (v) => Math.max(0, Math.min(100, ((Math.log10(Math.max(1, v)) - minL) / (maxL - minL)) * 100));
+
+  wrap.appendChild(h('table', { class: 'radar-table' },
+    makeHead([['Rank / 200-Band', 'rank', 0], ['Protocol & Snapshot Record', 'name', 0], ['Category', null, 0], ['Implied FDV (P10–P90)', 'implied_value_usd', 1], ['Snapshot TVL', 'tvl_usd', 1], ['7d Growth', 'change_7d', 1], ['Unminted', 'age_days', 1], ['Net Farm EV', 'net_ev_usd', 1], ['Verdict / BE', 'breakeven_bps', 1]], false),
+    h('tbody', null, shown.map(({ r, fp }) => {
+      const ch = r.chains.slice(0, 2).join(', ') + (r.chains.length > 2 ? ' +' + (r.chains.length - 2) : '');
+      const p10 = pos(r.p10_value_usd), p50 = pos(r.implied_value_usd), p90 = pos(r.p90_value_usd);
       return h('tr', {
-        class: state.selected === r.slug ? 'is-selected' : '', tabindex: '0',
-        onclick: function () { openProtocolDrawer(r.slug); },
-        onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openProtocolDrawer(r.slug); } }
+        class: st.selected === r.slug ? 'is-selected' : '', tabindex: '0', 'data-slug': r.slug,
+        onclick: () => openSheet(r.slug),
+        onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSheet(r.slug); } }
       },
-        h('td', { class: 'num' }, span('rank-badge' + (r.rank <= 10 ? ' rank-top' : ''), '#' + r.rank)),
-        h('td', null, div('proto-cell', div('proto-name-line', span('proto-name', r.name), span('tier-chip ' + (r.is_watchlist ? 'tier-wl' : 'tier-gem'), r.is_watchlist ? 'WATCHLIST' : 'EARLY GEM')), div('proto-sub', span('', chText), span('', '· Records no token')))),
-        h('td', null, span('cat-badge', r.category_label)),
-        h('td', { class: 'num align-right', text: fmtUsd(r.tvl_usd) }),
-        h('td', { class: 'num align-right', text: fmtMult(r.waterfall.category_multiple) }),
-        h('td', { class: 'num align-right ' + dCls, text: fmtPct(r.change_7d) }),
-        h('td', { class: 'num align-right', text: fmtShortTenure(r.tenure_days) }),
-        h('td', { class: 'align-right' }, div('fdv-cell', h('div', { class: 'fdv-bar-track', 'aria-hidden': 'true' }, h('div', { class: 'fdv-bar-fill', style: 'width:' + barPct + '%' })), span('fdv-val', fmtUsd(r.implied_value_usd)))),
-        h('td', { class: 'align-right' }, span('eff-pill', '$' + r.yield_per_1k_tvl.toFixed(1) + '/$1k')),
-        h('td', { class: 'align-right' }, span('action-hint', fmtWholeUsd(r.farm_plan.minCapitalUsd) + ' · ' + r.farm_plan.durationDays + 'd ->'))
+        td('', dv('rk-cell', sp('rk-main', '#' + r.rank), sp('rk-band', '[' + r.rank_best + '..' + r.rank_worst + ']'))),
+        td('', dv('p-cell', dv('p-top', sp('p-name', r.name), bdg(r.is_watchlist ? 'b-wl' : 'b-disc', r.is_watchlist ? 'WATCHLIST' : 'SUB-$50M')), sp('p-sub', ch + ' · Records no token'))),
+        td('', dv('rk-cell', bdg('b-cat', r.category_label), sp('rk-band', fMul(r.implied_tvl_multiple) + ' TVL'))),
+        td('r-align', dv('fdv-stack', sp('fdv-main', fUsd(r.implied_value_usd)), dv('ci-track', h('i', { class: 'ci-span', style: 'left:' + p10.toFixed(1) + '%;width:' + Math.max(3, p90 - p10).toFixed(1) + '%' }), h('i', { class: 'ci-mid', style: 'left:' + p50.toFixed(1) + '%' })), sp('fdv-sub', fUsd(r.p10_value_usd) + ' – ' + fUsd(r.p90_value_usd)))),
+        td('mono r-align', fUsd(r.tvl_usd)),
+        td('mono r-align ' + (r.change_7d == null ? 'muted' : r.change_7d >= 0 ? 'pos' : 'neg'), fPct(r.change_7d)),
+        td('mono r-align', dv('fdv-stack', sp('', r.age_days == null ? 'unlisted' : r.age_days + 'd'), sp('fdv-sub', r.listed_at ? r.listed_at.slice(0, 7) : 'no date'))),
+        td('r-align', dv('ev-stack', sp('fdv-main ' + (fp.net_ev_usd > 0 ? 'pos' : 'neg'), fSgn(fp.net_ev_usd)), sp('fdv-sub', 'Gross ' + fCst(fp.gross_airdrop_usd) + ' − Cost ' + fCst(fp.total_cost_usd)))),
+        td('r-align', dv('ev-stack', bdg(vCls(fp.verdict), fp.verdict), sp('fdv-sub', 'BE ' + Math.round(fp.breakeven_bps) + ' bps')))
       );
-    }));
-    return div('table-scroll', h('table', { class: 'radar-table' }, h('thead', null, h('tr', null,
-      makeSortHeader('Rank', 'rank', false, false), makeSortHeader('Protocol & Snapshot Record', 'name', false, false), h('th', { scope: 'col', text: 'Category' }),
-      makeSortHeader('TVL', 'tvl_usd', true, false), makeSortHeader('Cat Mult', 'category_multiple', true, false), makeSortHeader('7d Flow', 'change_7d', true, false),
-      makeSortHeader('Tenure', 'tenure_days', true, false), makeSortHeader('Implied Launch FDV', 'implied_value_usd', true, false), makeSortHeader('Est. Pool/$1k', 'yield_per_1k_tvl', true, false),
-      h('th', { scope: 'col', class: 'align-right', text: 'Farm Plan' })
-    )), tbody));
-  }
+    }))
+  ));
+}
 
-  function renderTradedPeersTable(peers) {
-    if (!peers.length) return div('empty-state', h('h3', { text: 'No traded peer comps match current filters' }), h('button', { type: 'button', class: 'reset-btn', text: 'Clear All Filters', onclick: resetAllFilters }));
-    var tbody = h('tbody', null, peers.map(function (p) {
-      var dCls = p.change_7d === null ? 'delta-flat' : (p.change_7d >= 0 ? 'delta-pos' : 'delta-neg');
-      var chText = p.chains && p.chains.length ? p.chains.slice(0, 3).join(', ') + (p.chains.length > 3 ? ' +' + (p.chains.length - 3) : '') : 'Multi-Chain';
-      return h('tr', null,
-        h('td', { class: 'num' }, span('tier-chip tier-live', p.symbol ? '$' + p.symbol : 'TRADED')),
-        h('td', null, div('proto-cell', span('proto-name', p.name), span('proto-sub', chText + ' · Set aside from pre-token board'))),
-        h('td', null, span('cat-badge', p.category)),
-        h('td', { class: 'num align-right', text: fmtUsd(p.tvl_usd) }),
-        h('td', { class: 'num align-right', text: fmtUsd(p.mcap_usd) }),
-        h('td', { class: 'num align-right', text: fmtMult(p.mcap_tvl_multiple) }),
-        h('td', { class: 'num align-right', text: fmtMult(p.winsorized_multiple) }),
-        h('td', { class: 'num align-right ' + dCls, text: fmtPct(p.change_7d) })
-      );
-    }));
-    return div('table-scroll', h('table', { class: 'radar-table' }, h('thead', null, h('tr', null,
-      h('th', { scope: 'col', text: 'Ticker' }), makeSortHeader('Traded Protocol (Live Token Set Aside)', 'name', false, true), h('th', { scope: 'col', text: 'Category' }),
-      makeSortHeader('Snapshot TVL', 'tvl_usd', true, true), makeSortHeader('Live Market Cap', 'mcap_usd', true, true), makeSortHeader('Raw MCap/TVL', 'mcap_tvl_multiple', true, true),
-      h('th', { scope: 'col', class: 'align-right', text: 'Winsorized Mult' }), makeSortHeader('7d Flow', 'change_7d', true, true)
-    )), tbody));
-  }
-
-  function renderValuationWaterfall(row, spec) {
-    var wf = row.waterfall, recomputed = recomputeImpliedValue(row, spec);
-    var exact = Math.abs(recomputed - row.implied_value_usd) <= 2;
-    var maxStage = Math.max(wf.tvl_usd, wf.category_base_usd, wf.after_scale_usd, wf.after_growth_usd, wf.after_tenure_usd, wf.implied_value_usd, 1);
-    var steps = [
-      ['1. Sealed Snapshot TVL', 'base', wf.tvl_usd, false],
-      ['2. Cat. EB Multiple (' + row.category_label + ', n=' + row.peer_sample_count + ')', 'x ' + fmtMult(wf.category_multiple), wf.category_base_usd, false],
-      ['3. Sub-Linear TVL Scale ($50M pivot)', 'x ' + fmtFactor(wf.scale_factor), wf.after_scale_usd, false],
-      ['4. 7d Flow Momentum (' + fmtPct(row.change_7d) + ')', 'x ' + fmtFactor(wf.growth_factor), wf.after_growth_usd, false],
-      ['5. Tokenless Tenure (' + fmtTenure(row.tenure_days) + ')', 'x ' + fmtFactor(wf.tenure_factor), wf.after_tenure_usd, false],
-      ['6. Multi-Chain Breadth (' + row.chain_count + ' chain' + (row.chain_count === 1 ? '' : 's') + ')', 'x ' + fmtFactor(wf.chain_factor), wf.implied_value_usd, true]
-    ];
-    var rowsBox = div('wf-rows', steps.map(function (s) {
-      var pct = Math.max(4, Math.min(100, Math.round(Math.pow(s[2] / maxStage, 0.55) * 100)));
-      return div('wf-row' + (s[3] ? ' wf-final' : ''),
-        div('wf-row-top', span('wf-label', s[0]), span('wf-mult', s[1]), span('wf-val', fmtUsd(s[2]))),
-        h('div', { class: 'wf-bar-track', 'aria-hidden': 'true' }, h('div', { class: 'wf-bar-fill', style: 'width:' + pct + '%' }))
-      );
-    }));
-    var effMult = row.effective_multiple || (wf.implied_value_usd / Math.max(1, wf.tvl_usd));
-    var subText = row.peer_sample_count >= 3
-      ? 'Eff. ' + fmtMult(effMult) + ' · Peer IQR ' + fmtMult(row.category_p25_multiple) + '-' + fmtMult(row.category_p75_multiple)
-      : 'Eff. ' + fmtMult(effMult) + ' · EB shrunk -> ' + fmtMult(DATA.summary.global_shrunk_prior_multiple) + ' prior';
-    return h('section', { class: 'drawer-card' },
-      div('section-hdr', h('h3', { class: 'section-title', text: 'Valuation Waterfall' }), span('section-sub', subText)),
-      rowsBox,
-      h('p', { class: 'parity-note', text: 'Client recomputeImpliedValue() = ' + fmtWholeUsd(recomputed) + (exact ? ' (exact match with board.json).' : '.') + ' Est. ' + row.airdrop_pct.toFixed(2) + '% float = ' + fmtUsd(row.est_pool_usd) + '.' })
-    );
-  }
-
-  function renderCategoryPeers(row, data) {
-    var allSample = (data.tradedSample || []).slice().sort(function (a, b) { return b.tvl_usd - a.tvl_usd; });
-    var direct = allSample.filter(function (p) { return p.category === row.category_label; }).slice(0, 4);
-    var spec = data.model_spec || {};
-    if (direct.length < 4) {
-      var seen = {};
-      direct.forEach(function (p) { seen[p.slug] = true; });
-      allSample.forEach(function (p) {
-        if (direct.length >= 4 || seen[p.slug]) return;
-        if (p.mcap_tvl_multiple >= (spec.winsor_floor_multiple || 0.03) && p.mcap_tvl_multiple <= (spec.winsor_cap_multiple || 1.65)) {
-          direct.push(p); seen[p.slug] = true;
-        }
-      });
-    }
-    var comps = direct.length ? direct : (row.peer_comps || []).slice(0, 4);
-    var modeMap = {
-      category: row.peer_sample_count + ' direct ' + row.category_label + ' peers',
-      blended_prior: row.peer_sample_count + ' direct + EB prior anchor comps',
-      global_prior: 'EB global prior anchor comps (n=0 direct)'
-    };
-    var listBox = div('peer-list', comps.map(function (p) {
-      var winDiff = p.winsorized_multiple !== undefined && Math.abs(p.mcap_tvl_multiple - p.winsorized_multiple) > 0.01;
-      var multTxt = winDiff ? fmtMult(p.winsorized_multiple) + ' cap (' + fmtMult(p.mcap_tvl_multiple) + ')' : fmtMult(p.mcap_tvl_multiple);
-      return div('peer-item',
-        div('wf-label', h('strong', { text: p.name }), p.symbol ? span('peer-sym', '$' + p.symbol) : null),
-        span('num section-sub', 'TVL ' + fmtUsd(p.tvl_usd)),
-        span('num section-sub', 'MCap ' + fmtUsd(p.mcap_usd)),
-        span('wf-mult', multTxt)
-      );
-    }));
-    return h('section', { class: 'drawer-card' },
-      div('section-hdr', h('h3', { class: 'section-title', text: 'Empirical Traded Peer Comps' }), span('section-sub', modeMap[row.peer_match_mode] || (row.peer_sample_count + ' live peers'))),
-      listBox
-    );
-  }
-
-  function renderFarmPlaybook(row) {
-    var fp = row.farm_plan || {}, stepsRaw = row.farm_steps || fp.steps || [];
-    var kpiGrid = div('farm-kpis',
-      div('farm-kpi', span('', 'Min Capital'), h('strong', { text: fmtWholeUsd(fp.minCapitalUsd || 500) })),
-      div('farm-kpi', span('', 'Est. Total Gas'), h('strong', { text: fp.estGasUsd || 'Chain-calibrated' })),
-      div('farm-kpi', span('', 'Target Horizon'), h('strong', { text: (fp.durationDays || 45) + ' days' })),
-      div('farm-kpi', span('', 'Epoch Cadence'), h('strong', { text: fp.cadence || 'Weekly active' }))
-    );
-    var ol = h('ol', { class: 'playbook-steps' }, stepsRaw.map(function (raw, i) {
-      var parsed = parsePlaybookStep(raw, i);
-      return h('li', { class: 'playbook-step' },
-        div('step-top', span('step-phase', parsed.phase), div('step-tags', parsed.tags.map(function (t) { return span('step-tag', t); }))),
-        h('p', { class: 'step-body', text: parsed.body })
-      );
-    }));
-    return h('section', { class: 'drawer-card' },
-      div('section-hdr', h('h3', { class: 'section-title', text: 'Actionable Farm Playbook' }), span('section-sub', stepsRaw.length + ' concrete steps')),
-      kpiGrid, ol, fp.riskNote ? div('risk-banner', fp.riskNote) : null
-    );
-  }
-
-  function openProtocolDrawer(slug) {
-    var row = DATA.rows.filter(function (r) { return r.slug === slug; })[0];
-    if (!row) return;
-    state.selected = slug; syncUrlHash(); dom.detailDrawer.textContent = '';
-    var shownChains = (row.chains || []).slice(0, 6), extra = (row.chains || []).length - shownChains.length;
-    var chainRow = div('drawer-chains-row',
-      shownChains.map(function (c) { return span('chain-pill', c); }),
-      extra > 0 ? span('chain-pill', '+' + extra + ' chains') : null
-    );
-    dom.detailDrawer.appendChild(div('drawer-header',
-      div('drawer-title-block',
-        div('drawer-badges',
-          span('rank-badge rank-top', 'Rank #' + row.rank + ' of ' + DATA.summary.board_rows),
-          span('tier-chip ' + (row.is_watchlist ? 'tier-wl' : 'tier-gem'), row.is_watchlist ? 'WATCHLIST >=$50M' : 'EARLY GEM <$50M'),
-          span('cat-badge', row.category_label),
-          span('model-pill', row.confidence_tier + ' Confidence')
-        ),
-        h('h2', { class: 'drawer-title', id: 'drawer-title', text: row.name }),
-        h('p', { class: 'brand-sub', text: row.token_record_note + (row.listed_at ? ' · Tracked since ' + row.listed_at : '') }),
-        chainRow
+function renderTearSheet(row) {
+  const fp = getLiveFarmPlan(row, st.depositUsd, st.weeks), dc = row.decomposition;
+  sheet.textContent = '';
+  sheet.appendChild(dv('ts-head',
+    dv('',
+      dv('ts-badges',
+        bdg('b-wl', 'RANK #' + row.rank + ' [200-REFIT #' + row.rank_best + '..#' + row.rank_worst + ']'),
+        bdg(row.is_watchlist ? 'b-wl' : 'b-disc', row.is_watchlist ? 'WATCHLIST >=$50M' : 'SUB-$50M DISCOVERY'),
+        bdg('b-cat', row.category_label), fp.kyc_gated && bdg('b-thin', 'KYC / PERMISSIONED'),
+        bdg(vCls(fp.verdict), fp.verdict + ' (' + fSgn(fp.net_ev_usd) + ')')
       ),
-      div('drawer-hero-metrics',
-        div('hero-stat primary', div('hero-stat-label', 'Implied FDV'), div('hero-stat-val', fmtUsd(row.implied_value_usd))),
-        div('hero-stat', div('hero-stat-label', 'Pool / $1K TVL'), div('hero-stat-val', '$' + row.yield_per_1k_tvl.toFixed(1))),
-        h('button', { type: 'button', class: 'close-drawer-btn', 'aria-label': 'Close protocol detail drawer', text: 'Close [Esc]', onclick: closeProtocolDrawer })
+      h('h2', { class: 'ts-title', id: 'sheet-title', text: row.name }),
+      h('p', { class: 'ts-record-note', text: row.token_record_note + ' · Chains: ' + row.chains.slice(0, 6).join(', ') + (row.listed_at ? ' · Tracked since ' + row.listed_at : '') })
+    ),
+    btn('close-btn', 'Close [Esc]', closeSheet)
+  ));
+
+  sheet.appendChild(dv('ts-kpi-strip', ...[
+    ['IMPLIED LAUNCH FDV', fUsd(row.implied_value_usd), fEx(row.implied_value_usd), ''],
+    ['200-REFIT P10–P90', fUsd(row.p10_value_usd) + '–' + fUsd(row.p90_value_usd), 'P50 ' + fUsd(row.p50_value_usd) + ' · [#' + row.rank_best + '..#' + row.rank_worst + ']', ''],
+    ['SNAPSHOT TVL & MULT', fUsd(row.tvl_usd), fMul(row.implied_tvl_multiple) + ' TVL · 7d ' + fPct(row.change_7d), ''],
+    ['NET EV ($' + (st.depositUsd / 1000) + 'K · ' + st.weeks + 'W)', fSgn(fp.net_ev_usd), 'BE ' + Math.round(fp.breakeven_bps) + ' bps · Review ' + fp.review_date, fp.net_ev_usd >= 0 ? ' emerald-ink' : ' rust-ink']
+  ].map(([k, v, s, c]) => dv('ts-kpi', dv('ts-kpi-k', k), dv('ts-kpi-v' + c, v), dv('ts-kpi-s mono', s)))));
+
+  const sizer = dv('seg-group',
+    [2500, 10000, 50000].map((dep) => btn('seg-btn' + (st.depositUsd === dep ? ' is-active' : ''), '$' + (dep / 1000) + 'k', () => { st.depositUsd = dep; syncHash(); renderAll(); })),
+    [4, 8, 16].map((wk) => btn('seg-btn' + (st.weeks === wk ? ' is-active' : ''), wk + 'w', () => { st.weeks = wk; syncHash(); renderAll(); }))
+  );
+
+  sheet.appendChild(dv('ts-grid',
+    dv('',
+      h('section', { class: 'ts-card', style: 'margin-bottom:8px' },
+        dv('ts-card-hdr', h('h3', { class: 'ts-card-title', text: 'Valuation Decomposition' }), sp('ts-card-sub', 'fitOnePerTickerComps')),
+        dv('decomp-list', ...[
+          ['1. Snapshot TVL (' + D.as_of + ')', fEx(row.tvl_usd)],
+          ['2. Power-Law Base (β=' + D.econometrics.beta_tvl.toFixed(3) + ')', fUsd(dc.base_curve_usd) + ' (' + D.econometrics.smearing_factor.toFixed(2) + 'x smear)'],
+          ['3. Category EB (' + row.category_label + ')', dc.category_factor.toFixed(3) + 'x'],
+          ['4. 7d Flow (' + fPct(row.change_7d) + ')', dc.growth_factor.toFixed(3) + 'x'],
+          ['5. Seasoning (' + (row.age_days == null ? 'unlisted' : row.age_days + 'd') + ')', dc.seasoning_factor.toFixed(3) + 'x (S=' + dc.season_score.toFixed(2) + ')'],
+          ['6. Implied Launch FDV (board.json)', fEx(row.implied_value_usd) + ' (' + fMul(row.implied_tvl_multiple) + ')', '', 1]
+        ].map((x) => kv(x[0], x[1], x[2], x[3])))
+      ),
+      h('section', { class: 'ts-card' },
+        dv('ts-card-hdr', h('h3', { class: 'ts-card-title', text: '3 Nearest Traded-Token Comps' }), sp('ts-card-sub', 'findNearestTradedComps')),
+        h('table', { class: 'comps-mini-table' },
+          h('thead', null, h('tr', null, ['Ticker', 'Anchor', 'TVL', 'MCap', 'MCap/TVL'].map((t, i) => h('th', i > 1 ? { class: 'r-align', text: t } : { text: t })))),
+          h('tbody', null, (row.nearest_comps || []).map((c) => h('tr', null, td('mono', '$' + c.symbol), td('', c.name), td('mono r-align', fUsd(c.tvl_usd)), td('mono r-align', fUsd(c.mcap_usd)), td('mono r-align', fMul(c.mcap_tvl_multiple)))))
+        )
       )
-    ));
-    dom.detailDrawer.appendChild(div('drawer-grid',
-      div('drawer-col', renderValuationWaterfall(row, DATA.model_spec), renderCategoryPeers(row, DATA)),
-      div('drawer-col', renderFarmPlaybook(row))
-    ));
-    dom.drawerBackdrop.hidden = false;
-    renderMainView();
-  }
+    ),
+    h('section', { class: 'ts-card' },
+      dv('ts-card-hdr', h('h3', { class: 'ts-card-title', text: 'Dollar-Itemized Farm Cost & EV' }), sizer),
+      dv('ledger-list', ...[
+        ['Mechanism & Venue', fp.mechanism_label + ' · ' + fp.execution_chain],
+        ['Principal & Exit', fEx(fp.deposit_usd) + ' · ' + fp.weeks + 'w (-> ' + fp.review_date + ')'],
+        ['Gross Airdrop (' + fp.airdrop_bps + ' bps)', '+' + fCst(fp.gross_airdrop_usd), 'pos'],
+        ['Gas + Bridge (' + fp.tx_count + ' txs)', '-' + fCst(fp.gas_bridge_usd), 'neg'],
+        ['Slippage & Funding Drag', '-' + fCst(fp.execution_drag_usd), 'neg'],
+        ['Net 4.5% USDC Opp. Cost', '-' + fCst(fp.opp_cost_usd) + ' (' + fCst(fp.gross_opp_cost_usd) + '−' + fCst(fp.native_yield_offset_usd) + ')', 'neg'],
+        ['Net Expected EV & BE', fSgn(fp.net_ev_usd) + ' (' + fp.net_roi_pct.toFixed(2) + '%) · BE ' + Math.round(fp.breakeven_bps) + ' bps', fp.net_ev_usd >= 0 ? 'pos' : 'neg', 1]
+      ].map((x) => kv(x[0], x[1], x[2], x[3]))),
+      h('p', { class: 'ts-note', text: fp.verdict + ': ' + fp.verdict_reason + (fp.risk_note ? ' ' + fp.risk_note : '') })
+    )
+  ));
 
-  function closeProtocolDrawer() {
-    state.selected = null;
-    dom.drawerBackdrop.hidden = true;
-    syncUrlHash();
-    renderMainView();
-  }
+  const steps = fp.farm_steps || [];
+  sheet.appendChild(h('section', { class: 'ts-card' },
+    dv('ts-card-hdr', h('h3', { class: 'ts-card-title', text: 'Concrete Dated Farming Playbook (' + steps.length + ' Steps)' }), sp('ts-card-sub', 'Midpoint ' + fp.midpoint_date + ' · Exit ' + fp.review_date)),
+    h('ol', { class: 'steps-grid' }, steps.map((s, i) => h('li', { class: 'step-item' }, sp('step-num', '0' + (i + 1)), sp('', String(s).replace(/^\d+\.\s*/, '')))))
+  ));
+}
 
-  function renderActiveFilterPills(shownCount, totalCount) {
-    var pills = [];
-    if (state.q.trim()) pills.push('Search: "' + state.q.trim() + '"');
-    if (state.category !== 'all') pills.push('Category: ' + state.category);
-    if (state.chain !== 'all') pills.push('Chain: ' + state.chain);
-    if (state.mode === 'pretoken' && state.tier !== 'all') pills.push('Tier: ' + (state.tier === 'watchlist' ? 'Watchlist >=$50M' : 'Early Gems <$50M'));
-    var hasFilter = pills.length > 0;
-    dom.resetBtn.hidden = !hasFilter;
-    dom.activeFiltersRow.hidden = !hasFilter;
-    dom.activeFiltersRow.textContent = '';
-    pills.forEach(function (p) { dom.activeFiltersRow.appendChild(h('span', { class: 'active-filter-pill', text: p })); });
-    if (hasFilter) dom.activeFiltersRow.appendChild(h('span', { class: 'section-sub', text: 'Showing ' + shownCount + ' of ' + totalCount + ' protocols' }));
-  }
+function openSheet(slug) {
+  if (!slug) return closeSheet();
+  const found = D.rows.find((r) => r.slug === slug);
+  if (!found) return;
+  st.selected = slug; backdrop.hidden = false; renderTearSheet(found); renderCalibrationSvg(); renderBoardView(); syncHash();
+}
+function closeSheet() { st.selected = null; backdrop.hidden = true; renderCalibrationSvg(); renderBoardView(); syncHash(); }
+function resetFilters() {
+  Object.assign(st, { cohort: 'all', verdict: 'ALL', category: 'all', chain: 'all', q: '' });
+  $('q-input').value = ''; $('cat-select').value = 'all'; $('chain-select').value = 'all'; syncHash(); renderAll();
+}
 
-  function resetAllFilters() {
-    state.q = ''; state.category = 'all'; state.chain = 'all'; state.tier = 'all';
-    dom.searchInput.value = ''; dom.filterCategory.value = 'all'; dom.filterChain.value = 'all';
-    syncUrlHash(); renderMainView();
-  }
+const HKEYS = [['cohort', 'cohort', 'all'], ['verdict', 'verdict', 'ALL'], ['category', 'cat', 'all'], ['chain', 'chain', 'all'], ['q', 'q', ''], ['depositUsd', 'deposit', 10000], ['weeks', 'weeks', 8], ['selected', 'slug', null]];
+function syncHash() {
+  const p = new URLSearchParams();
+  for (const [k, hk, def] of HKEYS) { const v = typeof st[k] === 'string' ? st[k].trim() : st[k]; if (v && v !== def) p.set(hk, String(v)); }
+  const s = p.toString();
+  try { history.replaceState(null, '', s ? '#' + s : location.pathname + location.search); } catch (_e) {}
+}
+function applyPatch(p) {
+  if (!p) return;
+  if (p.cohort) st.cohort = p.cohort;
+  if (p.verdict) st.verdict = String(p.verdict).toUpperCase();
+  if (p.category !== undefined || p.cat) st.category = $('cat-select').value = p.category ?? p.cat;
+  if (p.chain !== undefined) st.chain = $('chain-select').value = p.chain;
+  if (p.q !== undefined) st.q = $('q-input').value = p.q;
+  if (p.depositUsd || p.deposit) st.depositUsd = Number(p.depositUsd || p.deposit) || 10000;
+  if (p.weeks) st.weeks = Number(p.weeks) || 8;
+  if (p.sort) st.sort = p.sort;
+  if (p.dir !== undefined) st.dir = p.dir;
+  if (p.slug !== undefined) st.selected = p.slug;
+}
+function renderAll() {
+  renderCalibrationSvg(); renderBoardView();
+  const found = st.selected ? D.rows.find((r) => r.slug === st.selected) : null;
+  backdrop.hidden = !found; if (found) renderTearSheet(found);
+}
 
-  function syncUrlHash() {
-    var params = new URLSearchParams();
-    if (state.mode !== 'pretoken') params.set('mode', state.mode);
-    if (state.q.trim()) params.set('q', state.q.trim());
-    if (state.category !== 'all') params.set('cat', state.category);
-    if (state.chain !== 'all') params.set('chain', state.chain);
-    if (state.tier !== 'all') params.set('tier', state.tier);
-    if (state.sort !== 'rank') params.set('sort', state.sort);
-    if (state.selected) params.set('p', state.selected);
-    var next = params.toString();
-    window.history.replaceState(null, '', next ? '#' + next : window.location.pathname + window.location.search);
-  }
+(D.categories || []).forEach((c) => $('cat-select').appendChild(h('option', { value: c.category, text: c.category + ' (' + c.count + ' · ' + c.category_factor.toFixed(2) + 'x)' })));
+(D.chains || []).slice(0, 45).forEach((c) => $('chain-select').appendChild(h('option', { value: c.chain, text: c.chain + ' (' + c.count + ')' })));
 
-  function applyUrlHash() {
-    var raw = window.location.hash.replace(/^#/, '');
-    if (!raw) return;
-    var p = new URLSearchParams(raw);
-    if (p.get('mode') === 'peers') state.mode = 'peers';
-    if (p.get('q')) state.q = p.get('q');
-    if (p.get('cat')) state.category = p.get('cat');
-    if (p.get('chain')) state.chain = p.get('chain');
-    if (p.get('tier') === 'watchlist' || p.get('tier') === 'early') state.tier = p.get('tier');
-    if (p.get('sort')) { state.sort = p.get('sort'); state.dir = (state.sort === 'rank' || state.sort === 'name') ? 1 : -1; }
-    if (p.get('p')) state.selected = p.get('p');
-  }
+for (const [id, sel, attr, key, num, all] of [
+  ['cohort-tabs', '.cohort-tab', 'data-cohort', 'cohort', 0, 1],
+  ['verdict-bar', '.v-btn', 'data-verdict', 'verdict', 0, 0],
+  ['deposit-group', '.seg-btn', 'data-deposit', 'depositUsd', 1, 1],
+  ['horizon-group', '.seg-btn', 'data-weeks', 'weeks', 1, 1]
+]) on($(id), 'click', (e) => {
+  const b = e.target.closest(sel);
+  if (!b || (!all && st.cohort === 'anchors')) return;
+  st[key] = num ? Number(b.getAttribute(attr)) : b.getAttribute(attr);
+  syncHash(); all ? renderAll() : renderBoardView();
+});
+for (const [id, ev, k] of [['q-input', 'input', 'q'], ['cat-select', 'change', 'category'], ['chain-select', 'change', 'chain']]) {
+  on($(id), ev, () => { st[k] = $(id).value; syncHash(); renderBoardView(); });
+}
+on($('reset-btn'), 'click', resetFilters);
+on(backdrop, 'click', (e) => { if (e.target === backdrop) closeSheet(); });
+on(document, 'keydown', (e) => {
+  if (e.key === 'Escape' && !backdrop.hidden) closeSheet();
+  else if (e.key === '/' && document.activeElement !== $('q-input')) { e.preventDefault(); $('q-input').focus(); }
+});
 
-  function renderMainView() {
-    var isPre = state.mode === 'pretoken';
-    dom.tabPretoken.classList.toggle('is-active', isPre);
-    dom.tabPretoken.setAttribute('aria-selected', isPre ? 'true' : 'false');
-    dom.tabPeers.classList.toggle('is-active', !isPre);
-    dom.tabPeers.setAttribute('aria-selected', !isPre ? 'true' : 'false');
-    dom.tierPills.style.display = isPre ? 'inline-flex' : 'none';
-    dom.tierPills.querySelectorAll('.pill-btn').forEach(function (btn) {
-      btn.classList.toggle('is-active', btn.getAttribute('data-tier') === state.tier);
-    });
-    renderCalibrationStrip(DATA);
-    dom.tableContainer.textContent = '';
-    if (isPre) {
-      var filtered = sortCandidateRows(filterCandidateRows(DATA.rows, state), state.sort, state.dir);
-      dom.resultCounter.textContent = filtered.length + ' / ' + DATA.rows.length + ' pre-token';
-      renderActiveFilterPills(filtered.length, DATA.rows.length);
-      dom.tableContainer.appendChild(renderRadarTable(filtered));
-    } else {
-      var allPeers = DATA.tradedSample || [];
-      var peers = sortTradedPeers(filterTradedPeers(allPeers, state), state.peerSort, state.peerDir);
-      dom.resultCounter.textContent = peers.length + ' / ' + allPeers.length + ' traded peers';
-      renderActiveFilterPills(peers.length, allPeers.length);
-      dom.tableContainer.appendChild(renderTradedPeersTable(peers));
-    }
-  }
+window.selectProtocol = openSheet;
+window.setRadarState = (p) => { applyPatch(p); syncHash(); renderAll(); };
 
-  function populateDropdowns() {
-    var cats = (DATA.categories || []).slice(), seen = {};
-    cats.forEach(function (c) { seen[c.category] = true; });
-    (DATA.tradedPeerSummary || []).forEach(function (p) {
-      if (!seen[p.category]) cats.push({ category: p.category, count: 0, shrunk_multiple: p.shrunk_multiple });
-    });
-    cats.sort(function (a, b) { return a.category < b.category ? -1 : 1; }).forEach(function (c) {
-      dom.filterCategory.appendChild(h('option', { value: c.category, text: c.category + ' (' + fmtMult(c.shrunk_multiple) + ')' }));
-    });
-    (DATA.chains || []).slice(0, 45).forEach(function (ch) {
-      dom.filterChain.appendChild(h('option', { value: ch.chain, text: ch.chain + ' (' + ch.count + ')' }));
-    });
-  }
-
-  function init() {
-    applyUrlHash();
-    populateDropdowns();
-    var s = DATA.summary, parity = verifyBoardParity(DATA.rows, DATA.model_spec);
-    dom.modelPill.textContent = DATA.model_version || 'eb-radar-v1.1';
-    dom.asOf.textContent = DATA.as_of || '--';
-    dom.floor.textContent = fmtUsd(DATA.floor_usd || 50000000);
-    dom.tabPretokenCount.textContent = String(s.board_rows);
-    dom.tabPeersCount.textContent = String(s.traded_peer_rows);
-    if (dom.pillAll) dom.pillAll.textContent = '(' + s.board_rows + ')';
-    if (dom.pillWl) dom.pillWl.textContent = '(' + s.watchlist_covered + ')';
-    if (dom.pillGem) dom.pillGem.textContent = '(' + s.early_gem_rows + ')';
-    dom.parityVal.textContent = parity.matched + '/' + parity.total + ' EXACT';
-    dom.searchInput.value = state.q;
-    dom.filterCategory.value = state.category;
-    dom.filterChain.value = state.chain;
-
-    renderKpiStrip(DATA, parity);
-    renderMainView();
-    if (state.selected) openProtocolDrawer(state.selected);
-
-    dom.tabPretoken.addEventListener('click', function () { state.mode = 'pretoken'; syncUrlHash(); renderMainView(); });
-    dom.tabPeers.addEventListener('click', function () { state.mode = 'peers'; syncUrlHash(); renderMainView(); });
-    dom.searchInput.addEventListener('input', function () { state.q = dom.searchInput.value; syncUrlHash(); renderMainView(); });
-    dom.filterCategory.addEventListener('change', function () { state.category = dom.filterCategory.value; syncUrlHash(); renderMainView(); });
-    dom.filterChain.addEventListener('change', function () { state.chain = dom.filterChain.value; syncUrlHash(); renderMainView(); });
-    dom.tierPills.addEventListener('click', function (e) {
-      var btn = e.target.closest('.pill-btn');
-      if (!btn) return;
-      state.tier = btn.getAttribute('data-tier') || 'all';
-      syncUrlHash(); renderMainView();
-    });
-    dom.resetBtn.addEventListener('click', resetAllFilters);
-    dom.drawerBackdrop.addEventListener('click', function (e) { if (e.target === dom.drawerBackdrop) closeProtocolDrawer(); });
-    window.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && !dom.drawerBackdrop.hidden) closeProtocolDrawer();
-      else if (e.key === '/' && document.activeElement !== dom.searchInput) { e.preventDefault(); dom.searchInput.focus(); }
-    });
-  }
-
-  init();
+renderMastheadAndOos();
+applyPatch(Object.fromEntries(new URLSearchParams(location.hash.replace(/^#/, ''))));
+renderAll();
 })();
